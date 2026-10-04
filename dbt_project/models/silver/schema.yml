@@ -72,5 +72,5 @@ unit_tests:
           - {ticket_id: T-2, _op: d, _lsn: 30, user_id: null, subject: null, body: null, priority: null, status: null, category: null, _batch_id: "2026-08-12"}
     expect:
       rows:
-        - {ticket_id: T-1, priority: high, category: bug, body: "mail <EMAIL>", is_deleted: false, _lsn: 20}
-        - {ticket_id: T-2, priority: null, category: null, body: null, is_deleted: true, _lsn: 30}
+        - {ticket_id: T-1, priority: high, status: open, category: bug, body: "mail <EMAIL>", is_deleted: false, _lsn: 20, created_at: null, updated_at: null, user_id: u1, subject: s, _batch_id: "2026-08-11"}
+        - {ticket_id: T-2, priority: null, status: null, category: null, body: null, is_deleted: true, _lsn: 30, created_at: null, updated_at: null, user_id: null, subject: null, _batch_id: "2026-08-12"}

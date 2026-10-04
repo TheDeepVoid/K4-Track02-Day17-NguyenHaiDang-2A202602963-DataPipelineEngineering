@@ -19,13 +19,13 @@ select
     user_id,
     {{ mask_pii('subject') }}  as subject,
     {{ mask_pii('body') }}     as body,
-    priority,
-    status,
-    category,
-    created_at,
-    updated_at,
+    case when (_op = 'd') then null else priority end as priority,
+    case when (_op = 'd') then null else status end as status,
+    case when (_op = 'd') then null else category end as category,
+    case when (_op = 'd') then null else created_at end as created_at,
+    case when (_op = 'd') then null else updated_at end as updated_at,
     (_op = 'd')                as is_deleted,
     _lsn,
     _batch_id
 from changes
-qualify row_number() over (partition by ticket_id order by _lsn desc) = 1
+qualify row_number() over (partition by ticket_id order by _lsn desc, _batch_id desc) = 1
