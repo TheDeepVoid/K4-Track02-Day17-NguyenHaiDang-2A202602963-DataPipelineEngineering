@@ -37,23 +37,29 @@ def ticket_changes_sql(upto: str | None = None, batch: str | None = None) -> str
     return f"""
     SELECT * FROM (
         SELECT
-            j->'value'->'after'->>'ticket_id'                       AS ticket_id,
+            COALESCE(j->'value'->'after'->>'ticket_id',
+                     j->'value'->'before'->>'ticket_id',
+                     j->'value'->'key'->>'ticket_id') AS ticket_id,
             _op,
             (j->'value'->'source'->>'lsn')::BIGINT                  AS _lsn,
             make_timestamp((j->'value'->'source'->>'ts_ms')::BIGINT * 1000) AS _changed_at,
-            j->'value'->'after'->>'user_id'                         AS user_id,
-            j->'value'->'after'->>'subject'                         AS subject,
-            j->'value'->'after'->>'body'                            AS body,
-            j->'value'->'after'->>'priority'                        AS priority,
-            j->'value'->'after'->>'status'                          AS status,
-            j->'value'->'after'->>'category'                        AS category,
-            make_timestamp((j->'value'->'after'->>'created_at')::BIGINT) AS created_at,
-            make_timestamp((j->'value'->'after'->>'updated_at')::BIGINT) AS updated_at,
+            COALESCE(j->'value'->'after'->>'user_id', j->'value'->'before'->>'user_id') AS user_id,
+            COALESCE(j->'value'->'after'->>'subject', j->'value'->'before'->>'subject') AS subject,
+            COALESCE(j->'value'->'after'->>'body', j->'value'->'before'->>'body') AS body,
+            COALESCE(j->'value'->'after'->>'priority', j->'value'->'before'->>'priority') AS priority,
+            COALESCE(j->'value'->'after'->>'status', j->'value'->'before'->>'status') AS status,
+            COALESCE(j->'value'->'after'->>'category', j->'value'->'before'->>'category') AS category,
+            CASE WHEN COALESCE(j->'value'->'after'->>'created_at', j->'value'->'before'->>'created_at') IS NOT NULL
+                 THEN make_timestamp((COALESCE(j->'value'->'after'->>'created_at', j->'value'->'before'->>'created_at'))::BIGINT)
+                 ELSE NULL END AS created_at,
+            CASE WHEN COALESCE(j->'value'->'after'->>'updated_at', j->'value'->'before'->>'updated_at') IS NOT NULL
+                 THEN make_timestamp((COALESCE(j->'value'->'after'->>'updated_at', j->'value'->'before'->>'updated_at'))::BIGINT)
+                 ELSE NULL END AS updated_at,
             _batch_id,
             _ingested_at,
             _kafka_offset
         FROM (SELECT *, _payload::JSON AS j FROM {bronze_scan('tickets')} {_where(upto, batch)})
-        WHERE _op IS NOT NULL            -- Kafka tombstone (value = null): nothing changed
+        WHERE j IS NOT NULL AND _op IS NOT NULL            -- Kafka tombstone (value = null): nothing changed
     )
     WHERE ticket_id IS NOT NULL
     """

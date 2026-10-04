@@ -70,19 +70,45 @@ def upsert_silver_tickets(con: duckdb.DuckDBPyConnection, day: str) -> dict:
         SELECT ticket_id, user_id,
                mask_pii(subject) AS subject, mask_pii(body) AS body,
                priority, status, category, created_at, updated_at,
-               (_op = 'd') AS is_deleted, _lsn, _batch_id
+               (_op = 'd') AS is_deleted, _lsn, _batch_id, _kafka_offset
         FROM ({ticket_changes_sql(batch=day)})
-        QUALIFY row_number() OVER (PARTITION BY ticket_id ORDER BY _lsn DESC) = 1
+        QUALIFY row_number() OVER (PARTITION BY ticket_id ORDER BY _lsn DESC, _batch_id DESC, _kafka_offset DESC) = 1
     """)
     (n_changes,) = con.execute("SELECT count(*) FROM _latest_changes").fetchone()
 
     # Write this batch's changes to Silver.
     # A delete arrives as a change with is_deleted = true and every PII column null.
     con.execute("""
-        INSERT INTO silver_tickets
-        SELECT ticket_id, user_id, subject, body, priority, status, category,
-               created_at, updated_at, is_deleted, _lsn, _batch_id
-        FROM _latest_changes
+        MERGE INTO silver_tickets AS t
+        USING (
+            SELECT ticket_id, user_id, subject, body, priority, status, category,
+                   created_at, updated_at, is_deleted, _lsn, _batch_id
+            FROM _latest_changes
+        ) AS s
+        ON t.ticket_id = s.ticket_id
+        WHEN MATCHED AND (s._lsn > t._lsn OR (s._lsn = t._lsn AND s._batch_id > t._batch_id) OR
+                         (s._lsn = t._lsn AND s._batch_id = t._batch_id AND s._batch_id IS NOT NULL)) THEN
+            UPDATE SET
+                user_id = CASE WHEN s.is_deleted THEN NULL ELSE s.user_id END,
+                subject = CASE WHEN s.is_deleted THEN NULL ELSE s.subject END,
+                body = CASE WHEN s.is_deleted THEN NULL ELSE s.body END,
+                priority = s.priority,
+                status = s.status,
+                category = s.category,
+                created_at = s.created_at,
+                updated_at = s.updated_at,
+                is_deleted = s.is_deleted,
+                _lsn = s._lsn,
+                _batch_id = s._batch_id
+        WHEN NOT MATCHED THEN
+            INSERT (ticket_id, user_id, subject, body, priority, status, category,
+                    created_at, updated_at, is_deleted, _lsn, _batch_id)
+            VALUES (s.ticket_id, 
+                    CASE WHEN s.is_deleted THEN NULL ELSE s.user_id END,
+                    CASE WHEN s.is_deleted THEN NULL ELSE s.subject END,
+                    CASE WHEN s.is_deleted THEN NULL ELSE s.body END,
+                    s.priority, s.status, s.category,
+                    s.created_at, s.updated_at, s.is_deleted, s._lsn, s._batch_id)
     """)
     (n_rows,) = con.execute("SELECT count(*) FROM silver_tickets").fetchone()
     return {"changes_in_batch": n_changes, "silver_rows": n_rows}
